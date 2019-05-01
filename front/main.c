@@ -2,12 +2,11 @@
 #include <SDL2/SDL_error.h>
 #include <SDL2/SDL_timer.h>
 #include <SDL2/SDL_video.h>
-
 #include <inttypes.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <stdbool.h>
 #include <math.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdio.h>
 #include <time.h>
 
 #include "../src/defs.h"
@@ -39,55 +38,57 @@ static void report(
 {
 	va_list args;
 	va_start(args, format);
-	u8 buffer[200];
+	char buffer[200];
 	vsnprintf(buffer, sizeof buffer, format, args);
 
-	fputs(&buffer, stderr);
+	fputs((const char *)&buffer, stderr);
 	putc('\n', stderr);
 
-	if (SDL_ShowSimpleMessageBox(flags, title, &buffer)) {
+	if (SDL_ShowSimpleMessageBox(flags, title, (const char *)&buffer, NULL)) {
 		fprintf(
 			stderr, "Error showing simple message box: %s\n", SDL_GetError());
 		exit(-1);
 	}
 }
 
-u8 keypad_from_sdl_scancode(SDL_Scancode k) {
+u8 keypad_from_sdl_scancode(SDL_Scancode k)
+{
 	switch (k) {
-		case SDL_SCANCODE_1:
-			return 0;
-		case SDL_SCANCODE_2:
-			return 1;
-		case SDL_SCANCODE_3:
-			return 2;
-		case SDL_SCANCODE_4:
-			return 3;
-		case SDL_SCANCODE_Q:
-			return 4;
-		case SDL_SCANCODE_W:
-			return 5;
-		case SDL_SCANCODE_E:
-			return 6;
-		case SDL_SCANCODE_R:
-			return 7;
-		case SDL_SCANCODE_A:
-			return 8;
-		case SDL_SCANCODE_S:
-			return 9;
-		case SDL_SCANCODE_D:
-			return 10;
-		case SDL_SCANCODE_F:
-			return 11;
-		case SDL_SCANCODE_Z:
-			return 12;
-		case SDL_SCANCODE_X:
-			return 13;
-		case SDL_SCANCODE_C:
-			return 14;
-		case SDL_SCANCODE_V:
-			return 15;
+	case SDL_SCANCODE_1:
+		return 0;
+	case SDL_SCANCODE_2:
+		return 1;
+	case SDL_SCANCODE_3:
+		return 2;
+	case SDL_SCANCODE_4:
+		return 3;
+	case SDL_SCANCODE_Q:
+		return 4;
+	case SDL_SCANCODE_W:
+		return 5;
+	case SDL_SCANCODE_E:
+		return 6;
+	case SDL_SCANCODE_R:
+		return 7;
+	case SDL_SCANCODE_A:
+		return 8;
+	case SDL_SCANCODE_S:
+		return 9;
+	case SDL_SCANCODE_D:
+		return 10;
+	case SDL_SCANCODE_F:
+		return 11;
+	case SDL_SCANCODE_Z:
+		return 12;
+	case SDL_SCANCODE_X:
+		return 13;
+	case SDL_SCANCODE_C:
+		return 14;
+	case SDL_SCANCODE_V:
+		return 15;
+	default:
+		return 0xFF;
 	}
-	return 0xFF;
 }
 
 int main(int argc, char *argv[])
@@ -193,29 +194,32 @@ int main(int argc, char *argv[])
 				return 0;
 			case SDL_KEYDOWN: {
 				u8 k = keypad_from_sdl_scancode(event.key.keysym.scancode);
-				if (k == 0xFF) break; // Irrelevant key
+				if (k == 0xFF)
+					break; // Irrelevant key
 				chip8.keys |= 1 << k;
 				if (need_keypress) {
-					chip8_supply_key(k);
+					chip8_supply_key(&chip8, k);
 					need_keypress = false;
 				}
 				break;
 			}
 			case SDL_KEYUP: {
 				u8 k = keypad_from_sdl_scancode(event.key.keysym.scancode);
-				if (k == 0xFF) break; // Irrelevant key
+				if (k == 0xFF)
+					break; // Irrelevant key
 				chip8.keys &= ~(1 << k);
 				if (need_keypress) {
-					chip8_supply_key(k);
+					chip8_supply_key(&chip8, k);
 					need_keypress = false;
 				}
 				break;
 			}
-			// TODO: handle resize events
+				// TODO: handle resize events
 			}
 		}
-		
-		if (need_keypress) continue;
+
+		if (need_keypress)
+			continue;
 
 		// CYCLE
 		const enum chip8_interrupt in = chip8_cycle(&chip8);
@@ -242,7 +246,7 @@ int main(int argc, char *argv[])
 			delay_timer = SDL_GetTicks();
 			break;
 		case CHIP8_NEED_DELAY_TIMER:
-			chip8_supply_delay_timer(&chip8, dealy_timer);
+			chip8_supply_delay_timer(&chip8, delay_timer);
 			break;
 		case CHIP8_SOUND_TIMER_WRITE:
 			// TODO: set sound timer (SDL_AddTimer?)
@@ -250,8 +254,8 @@ int main(int argc, char *argv[])
 		case CHIP8_BAD_INSTRUCTION:
 			report(
 				SDL_MESSAGEBOX_ERROR,
-				"Invalid Instruction"
-				"Invalid instruction encountered: 0x%04"PRIX16,
+				"Invalid Instruction",
+				"Invalid instruction encountered: 0x%04" PRIX16,
 				chip8.mem[chip8.pc]);
 			return 8;
 		default:

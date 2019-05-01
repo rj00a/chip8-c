@@ -50,7 +50,8 @@ void chip8_init(struct chip8 *emu, const u8 *rom, size_t sz)
 	// TODO: Does it actually go from 0x50 to 0xA0?
 	memcpy(MEM, chip8_fontmap, sizeof chip8_fontmap);
 	// Program ROM goes from 0x200 to end.
-	if (sz > CHIP8_MAX_ROM_SIZE) sz = CHIP8_MAX_ROM_SIZE;
+	if (sz > CHIP8_MAX_ROM_SIZE)
+		sz = CHIP8_MAX_ROM_SIZE;
 	memcpy(MEM + 0x200, rom, sz);
 
 	memset(FB, 0, sizeof FB);
@@ -73,6 +74,8 @@ const char *chip8_interrupt_desc(enum chip8_interrupt e)
 		return "The emulator needs a random number to complete the current cycle.";
 	case CHIP8_GFX_OOB:
 		return "The sprite drawing instruction tried to read from memory out of bounds.";
+	case CHIP8_GFX_WRITE:
+		return "The graphics buffer was updated.";
 	case CHIP8_BAD_KEY:
 		return "Tried to set a key with a code greater than 0xF.";
 	case CHIP8_NEED_KEY:
@@ -97,7 +100,8 @@ const char *chip8_interrupt_desc(enum chip8_interrupt e)
 
 enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 {
-	if (PC == 0xFFF) return CHIP8_OOB_INSTRUCTION;
+	if (PC == 0xFFF)
+		return CHIP8_OOB_INSTRUCTION;
 
 	const u16 ins = MEM[PC] << 8 | MEM[PC + 1];
 
@@ -108,7 +112,8 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 			memset(FB, 0, sizeof(FB));
 			return CHIP8_OK;
 		case 0x00EE:
-			if (SP == 0) return CHIP8_SAS_UNDERFLOW;
+			if (SP == 0)
+				return CHIP8_SAS_UNDERFLOW;
 			PC = SAS[--SP] + 1;
 			return CHIP8_OK;
 		}
@@ -117,7 +122,8 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 		PC = ins & 0x0FFF;
 		return CHIP8_OK;
 	case 0x2: // Execute subroutine at NNN
-		if (SP == 15) return CHIP8_SAS_OVERFLOW;
+		if (SP == 15)
+			return CHIP8_SAS_OVERFLOW;
 		SAS[SP++] = PC;
 		PC = ins & 0x0FFF;
 		return CHIP8_OK;
@@ -128,9 +134,9 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 		PC += V[(ins & 0x0F00) >> 8] != (ins & 0x00FF) ? 4 : 2;
 		return CHIP8_OK;
 	case 0x5: // Skip next instruction if VX is equal to VY.
-		if ((ins & 0x000F) == 0) break;
-		PC +=
-			V[(ins & 0x0F00) >> 8] == V[(ins & 0x00F0) >> 4] ? 4 : 2;
+		if ((ins & 0x000F) == 0)
+			break;
+		PC += V[(ins & 0x0F00) >> 8] == V[(ins & 0x00F0) >> 4] ? 4 : 2;
 		return CHIP8_OK;
 	case 0x6: // Store NN in VX
 		V[(ins & 0x0F00) >> 8] = ins & 0x00FF;
@@ -189,9 +195,9 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 		return CHIP8_OK;
 	}
 	case 0x9: // Skip next instruction if VX and VY are not equal
-		if ((ins & 0x000F) != 0) break;
-		PC +=
-			V[(ins & 0x0F00) >> 8] == V[(ins & 0x00F0) >> 4] ? 4 : 2;
+		if ((ins & 0x000F) != 0)
+			break;
+		PC += V[(ins & 0x0F00) >> 8] == V[(ins & 0x00F0) >> 4] ? 4 : 2;
 		return CHIP8_OK;
 	case 0xA: // Store address NNN in register I
 		I = ins & 0x0FFF;
@@ -203,12 +209,14 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 	case 0xC: // Set VX to a random number
 		return CHIP8_NEED_RAND;
 	case 0xD: { // Draw sprite at pos VX, VY
+		// TODO: handle the gfx_wrapping option.
 		const u8 xpos = V[(ins & 0x0F00) >> 8];
 		const u8 ypos = V[(ins & 0x00F0) >> 4];
 		const u8 nrows = ins & 0x000F;
 
 		VF = 0;
-		if (I + nrows - 1 > 0xFFF) return CHIP8_GFX_OOB;
+		if (I + nrows - 1 > 0xFFF)
+			return CHIP8_GFX_OOB;
 
 		// Loop through the sprite bytes
 		for (int y = 0; y < nrows; y++) {
@@ -228,11 +236,13 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 		const u8 k = V[(ins & 0x0F00) >> 8];
 		switch (ins & 0x00FF) {
 		case 0x9E:
-			if (k > 0xF) return CHIP8_BAD_KEY;
+			if (k > 0xF)
+				return CHIP8_BAD_KEY;
 			PC += KEYS & 1 << k ? 4 : 2;
 			return CHIP8_OK;
 		case 0xA1:
-			if (k > 0xF) return CHIP8_BAD_KEY;
+			if (k > 0xF)
+				return CHIP8_BAD_KEY;
 			PC += KEYS & 1 << k ? 2 : 4;
 			return CHIP8_OK;
 		}
@@ -257,26 +267,30 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 			PC += 2;
 			return CHIP8_OK;
 		case 0x29: // Set I to the font digit in VX.
-			if (*vx > 0xF) return CHIP8_BAD_FONT_DIGIT;
+			if (*vx > 0xF)
+				return CHIP8_BAD_FONT_DIGIT;
 			// Font digits are 5 pixels tall.
 			I = *vx * 5;
 			PC += 2;
 			return CHIP8_OK;
 		case 0x33: // Write binary coded decimal (BCD) at I reg.
-			if (I + 2 > 0xFFF) return CHIP8_OOB_BCD;
+			if (I + 2 > 0xFFF)
+				return CHIP8_OOB_BCD;
 			MEM[I] = (*vx / 100) % 10;
 			MEM[I + 1] = (*vx / 10) % 10;
 			MEM[I + 2] = *vx % 10;
 			PC += 2;
 			return CHIP8_OK;
 		case 0x55: // Write V registers to memory at reg I.
-			if (I + x + 1 > 0xFFF) return CHIP8_OOB_REGWRITE;
+			if (I + x + 1 > 0xFFF)
+				return CHIP8_OOB_REGWRITE;
 			for (int i = 0; i < x + 1; i++) MEM[I + i] = V[i];
 			I += x + 1;
 			PC += 2;
 			return CHIP8_OK;
 		case 0x65: // Read memory at I into V registers
-			if (I + x + 1 > 0xFFF) return CHIP8_OOB_REGREAD;
+			if (I + x + 1 > 0xFFF)
+				return CHIP8_OOB_REGREAD;
 			for (int i = 0; i < x + 1; i++) V[i] = MEM[I + i];
 			I += x + 1;
 			PC += 2;
