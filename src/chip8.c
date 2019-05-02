@@ -100,7 +100,7 @@ const char *chip8_interrupt_desc(enum chip8_interrupt e)
 
 enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 {
-	if (PC == 0xFFF)
+	if (PC >= 0xFFF)
 		return CHIP8_OOB_INSTRUCTION;
 
 	const u16 ins = MEM[PC] << 8 | MEM[PC + 1];
@@ -231,9 +231,9 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 					continue;
 
 				// normalize to one or zero.
-				const u8 bitstate = !!(byte & 0x80 >> x);
+				const u8 bitstate = byte & 0x80 >> x ? 1 : 0;
 				// If a pixel goes from ON to OFF, set VF to 1.
-				u8 *pix = &FB[y + ypos][x + xpos];
+				u8 *pix = &FB[x + xpos][y + ypos];
 				bool initial = *pix;
 				*pix ^= bitstate;
 				if (initial && !*pix)
@@ -303,7 +303,8 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 			if (I + x + 1 > 0xFFF)
 				return CHIP8_OOB_REGREAD;
 			for (int i = 0; i < x + 1; i++) V[i] = MEM[I + i];
-			I += x + 1;
+			// I is left unmodified according to wikipedia.
+			//I += x + 1;
 			PC += 2;
 			return CHIP8_OK;
 		}

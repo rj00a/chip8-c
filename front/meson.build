@@ -1,5 +1,6 @@
 chip8front_src = files([
-	'main.c'])
+	'main.c',
+	'front.c'])
 
 # TODO: add fallback for sdl2. Test on windows.
 
