@@ -74,7 +74,7 @@ const char *chip8_interrupt_desc(enum chip8_interrupt e)
 		return "The emulator needs a random number to complete the current cycle.";
 	case CHIP8_GFX_OOB:
 		return "The sprite drawing instruction tried to read from memory out of bounds.";
-	case CHIP8_GFX_WRITE:
+	case CHIP8_GFX_UPDATE:
 		return "The graphics buffer was updated.";
 	case CHIP8_BAD_KEY:
 		return "Tried to set a key with a code greater than 0xF.";
@@ -110,7 +110,7 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 		switch (ins) {
 		case 0x00E0: // clear screen.
 			memset(FB, 0, sizeof(FB));
-			return CHIP8_OK;
+			return CHIP8_GFX_UPDATE;
 		case 0x00EE:
 			if (SP == 0)
 				return CHIP8_SAS_UNDERFLOW;
@@ -221,16 +221,27 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 		// Loop through the sprite bytes
 		for (int y = 0; y < nrows; y++) {
 			const u8 byte = MEM[I + y];
+			// If the row is out of bounds, we're done.
+			if (y + ypos > 32)
+				break;
 			// Loop through each bit in the byte
 			for (int x = 0; x < 8; x++) {
-				const u8 bit = byte & 0x80 >> x;
-				// If the set bit in fb turned off, set vf to 1.
-				if (!(FB[(y + ypos) % 32][(x + xpos) % 64] ^= bit))
+				// If the current pixel is out of bounds, continue.
+				if (x + xpos > 64)
+					continue;
+
+				// normalize to one or zero.
+				const u8 bitstate = !!(byte & 0x80 >> x);
+				// If a pixel goes from ON to OFF, set VF to 1.
+				u8 *pix = &FB[y + ypos][x + xpos];
+				bool initial = *pix;
+				*pix ^= bitstate;
+				if (initial && !*pix)
 					VF = 1;
 			}
 		}
 		PC += 2;
-		return CHIP8_GFX_WRITE;
+		return CHIP8_GFX_UPDATE;
 	}
 	case 0xE: { // Skip next instruction based on keypad state
 		const u8 k = V[(ins & 0x0F00) >> 8];

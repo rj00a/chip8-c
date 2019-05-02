@@ -12,9 +12,6 @@
 #include "../src/defs.h"
 #include "chip8.h"
 
-#define eputs(str) fputs(str, stderr)
-#define eprintf(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
-
 static u8 rom_buffer[CHIP8_MAX_ROM_SIZE];
 
 static struct chip8 chip8;
@@ -27,7 +24,8 @@ static struct chip8 chip8;
 	--wrapping-gfx
 	--disable-audio
 	--disable-message-boxes
-	--log-level
+	--foreground
+	--background
 */
 
 static void report(
@@ -91,42 +89,31 @@ u8 keypad_from_sdl_scancode(SDL_Scancode k)
 	}
 }
 
+#define RET_ERROR(...) \
+	do { \
+		report(SDL_MESSAGEBOX_ERROR, __VA_ARGS__); \
+		return __LINE__; \
+	} while (0)
+
 int main(int argc, char *argv[])
 {
-	if (argc == 1) {
-		report(
-			SDL_MESSAGEBOX_ERROR,
-			"Argument error",
-			"Must specify a ROM to read.");
-		return 1;
-	}
+	if (argc == 1)
+		RET_ERROR("Argument error", "Must specify a ROM to read.");
 
-	if (argc > 2) {
-		report(
-			SDL_MESSAGEBOX_ERROR,
-			"Argument error",
-			"Only one argument expected.");
-		return 2;
-	}
+	if (argc > 2)
+		RET_ERROR("Argument error", "Only one argument expected.");
 
 	const char *rompath = argv[1];
 
 	FILE *rom = fopen(rompath, "rb");
-	if (!rom) {
-		report(
-			SDL_MESSAGEBOX_ERROR,
-			"IO Error",
-			"Failed to open ROM file: %s",
-			rompath);
-		return 3;
-	}
+
+	if (!rom)
+		RET_ERROR("IO Error", "Failed to open ROM file: %s", rompath);
 
 	size_t rom_size = fread(rom_buffer, 1, CHIP8_MAX_ROM_SIZE, rom);
 
-	if (ferror(rom)) {
-		report(SDL_MESSAGEBOX_ERROR, "IO Error", "Error reading ROM file.");
-		return 4;
-	}
+	if (ferror(rom))
+		RET_ERROR("IO Error", "Error reading ROM file.");
 
 	if (!feof(rom))
 		report(
@@ -137,43 +124,41 @@ int main(int argc, char *argv[])
 	fclose(rom);
 
 	// Initialize SDL
-	if (SDL_Init(SDL_INIT_TIMER | SDL_INIT_AUDIO | SDL_INIT_VIDEO)) {
-		report(
-			SDL_MESSAGEBOX_ERROR,
+	if (SDL_Init(SDL_INIT_TIMER | SDL_INIT_AUDIO | SDL_INIT_VIDEO))
+		RET_ERROR("SDL Error", "Failed to initialize SDL: %s", SDL_GetError());
+
+	SDL_DisplayMode display_mode;
+	if (SDL_GetCurrentDisplayMode(0, &display_mode))
+		RET_ERROR(
 			"SDL Error",
-			"Failed to initialize SDL: %s",
+			"Failed to query current display mode: %s",
 			SDL_GetError());
-		return 5;
-	}
+
+	// If the width and height were not provided, make the window 1/4th the
+	// screen area.
+	int win_width = display_mode.w / 2;
+	int win_height = display_mode.h / 2;
 
 	SDL_Window *window = SDL_CreateWindow(
 		rompath,
 		SDL_WINDOWPOS_CENTERED,
 		SDL_WINDOWPOS_CENTERED,
-		64,
-		32,
+		win_width,
+		win_height,
 		SDL_WINDOW_RESIZABLE);
 
-	if (!window) {
-		report(
-			SDL_MESSAGEBOX_ERROR,
-			"SDL Error",
-			"Failed to create window: %s",
-			SDL_GetError());
-		return 6;
-	}
+	if (!window)
+		RET_ERROR("SDL Error", "Failed to create window: %s", SDL_GetError());
 
 	SDL_Renderer *renderer =
 		SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
-	if (!renderer) {
-		report(
-			SDL_MESSAGEBOX_ERROR,
-			"SDL Error",
-			"Failed to create renderer: %s",
-			SDL_GetError());
-		return 7;
-	}
+	if (!renderer)
+		RET_ERROR("SDL Error", "Failed to create renderer: %s", SDL_GetError());
+
+	if (SDL_RenderSetScale(renderer, win_width / 64.f, win_height / 32.f))
+		RET_ERROR(
+			"SDL Error", "Failed to set render scale: %s", SDL_GetError());
 
 	u32 mulberry32 = time(NULL);
 	u32 delay_timer = SDL_GetTicks();
@@ -183,7 +168,7 @@ int main(int argc, char *argv[])
 	chip8_init(&chip8, rom_buffer, rom_size);
 	while (1) {
 		// TODO: configurable cycle delay.
-		SDL_Delay(17); // 16.666ms == 60fps
+		SDL_Delay(17); // 16.666ms == 60hz
 
 		// TODO: decrease sound timer here.
 
@@ -192,22 +177,16 @@ int main(int argc, char *argv[])
 			switch (event.type) {
 			case SDL_QUIT:
 				return 0;
+			case SDL_KEYUP:
 			case SDL_KEYDOWN: {
 				u8 k = keypad_from_sdl_scancode(event.key.keysym.scancode);
 				if (k == 0xFF)
 					break; // Irrelevant key
-				chip8.keys |= 1 << k;
-				if (need_keypress) {
-					chip8_supply_key(&chip8, k);
-					need_keypress = false;
-				}
-				break;
-			}
-			case SDL_KEYUP: {
-				u8 k = keypad_from_sdl_scancode(event.key.keysym.scancode);
-				if (k == 0xFF)
-					break; // Irrelevant key
-				chip8.keys &= ~(1 << k);
+				if (event.type == SDL_KEYDOWN)
+					chip8.keys |= 1 << k;
+				else
+					chip8.keys &= ~(1 << k);
+
 				if (need_keypress) {
 					chip8_supply_key(&chip8, k);
 					need_keypress = false;
@@ -239,31 +218,58 @@ int main(int argc, char *argv[])
 		case CHIP8_NEED_KEY:
 			need_keypress = true;
 			break;
-		case CHIP8_GFX_WRITE:
-			// TODO: redraw graphics.
+		case CHIP8_GFX_UPDATE:
+			// Background color
+			if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0xFF))
+				RET_ERROR(
+					"SDL Error",
+					"Failed to set draw color: %s",
+					SDL_GetError());
+			if (SDL_RenderClear(renderer))
+				RET_ERROR(
+					"SDL Error",
+					"Failed to clear renderer: %s",
+					SDL_GetError());
+			// Foreground color
+			if (SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF))
+				RET_ERROR(
+					"SDL Error",
+					"Failed to set draw color: %s",
+					SDL_GetError());
+			for (int y = 0; y < 32; y++)
+				for (int x = 0; x < 64; x++)
+					if (chip8.fb[y][x])
+						// TODO: assume RenderDrawPoint succeeds?
+						if (SDL_RenderDrawPoint(renderer, x, y))
+							RET_ERROR(
+								"SDL Error",
+								"Failed to draw point at %d, %d: %s",
+								x,
+								y,
+								SDL_GetError());
+			SDL_RenderPresent(renderer);
 			break;
 		case CHIP8_DELAY_TIMER_WRITE:
 			delay_timer = SDL_GetTicks();
 			break;
-		case CHIP8_NEED_DELAY_TIMER:
-			chip8_supply_delay_timer(&chip8, delay_timer);
+		case CHIP8_NEED_DELAY_TIMER: {
+			// ticks_since is expected to overflow if more than 255 ticks pass.
+			// One tick is 1/60th of a second.
+			u8 ticks_since =
+				round((SDL_GetTicks() - delay_timer) / (1000.0 / 60));
+			chip8_supply_delay_timer(&chip8, ticks_since);
 			break;
+		}
 		case CHIP8_SOUND_TIMER_WRITE:
 			// TODO: set sound timer (SDL_AddTimer?)
 			break;
 		case CHIP8_BAD_INSTRUCTION:
-			report(
-				SDL_MESSAGEBOX_ERROR,
+			RET_ERROR(
 				"Invalid Instruction",
 				"Invalid instruction encountered: 0x%04" PRIX16,
 				chip8.mem[chip8.pc]);
-			return 8;
 		default:
-			report(
-				SDL_MESSAGEBOX_ERROR,
-				"Unrecoverable interrupt",
-				chip8_interrupt_desc(in));
-			return 9;
+			RET_ERROR("Unrecoverable Interrupt", chip8_interrupt_desc(in));
 		}
 	}
 

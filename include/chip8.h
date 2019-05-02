@@ -37,7 +37,7 @@ struct chip8 {
 	uint8_t mem[0x1000];
 	// The frame buffer
 	// Each byte indicates the state of a pixel.
-	// We could pack it 8x tighter but that would be annoying.
+	// We could pack it 8x tighter but that would be annoying to work with.
 	uint8_t fb[64][32];
 };
 
@@ -54,7 +54,8 @@ enum chip8_interrupt {
 	CHIP8_SAS_OVERFLOW,
 	CHIP8_NEED_RAND,
 	CHIP8_GFX_OOB,
-	CHIP8_GFX_WRITE,
+	CHIP8_GFX_UPDATE,
+	// TODO: CHIP8_GFX_CLEAR?
 	CHIP8_BAD_KEY,
 	CHIP8_NEED_KEY,
 	CHIP8_DELAY_TIMER_WRITE,
