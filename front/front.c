@@ -19,6 +19,12 @@ static struct chip8 chip8;
 
 #define ARRAY_LEN(a) (sizeof(a)/sizeof((a)[0]))
 
+#define RET_ERROR(...) \
+	do { \
+		report(SDL_MESSAGEBOX_ERROR, __VA_ARGS__); \
+		return __LINE__; \
+	} while (0)
+
 /* TODO: These command line options should be available:
 	--help
 	--width
@@ -39,6 +45,7 @@ static void report(
 {
 	va_list args;
 	va_start(args, format);
+
 	char buffer[200];
 	vsnprintf(buffer, sizeof buffer, format, args);
 
@@ -50,6 +57,43 @@ static void report(
 			stderr, "Error showing simple message box: %s\n", SDL_GetError());
 		exit(-1);
 	}
+}
+
+static int redraw(SDL_Renderer *renderer, struct chip8 *chip8)
+{
+
+	// Background color
+	if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0xFF))
+		RET_ERROR(
+			"SDL Error",
+			"Failed to set draw color: %s",
+			SDL_GetError());
+
+	if (SDL_RenderClear(renderer))
+		RET_ERROR(
+			"SDL Error",
+			"Failed to clear renderer: %s",
+			SDL_GetError());
+
+	// Foreground color
+	if (SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF))
+		RET_ERROR(
+			"SDL Error",
+			"Failed to set draw color: %s",
+			SDL_GetError());
+
+	for (int y = 0; y < 32; y++)
+		for (int x = 0; x < 64; x++)
+			if (chip8->fb[x][y])
+				if (SDL_RenderDrawPoint(renderer, x, y))
+					RET_ERROR(
+						"SDL Error",
+						"Failed to draw point at %d, %d: %s",
+						x,
+						y,
+						SDL_GetError());
+	SDL_RenderPresent(renderer);
+	return 0;
 }
 
 u8 keypad_from_sdl_scancode(SDL_Scancode k)
@@ -91,12 +135,6 @@ u8 keypad_from_sdl_scancode(SDL_Scancode k)
 		return 0xFF;
 	}
 }
-
-#define RET_ERROR(...) \
-	do { \
-		report(SDL_MESSAGEBOX_ERROR, __VA_ARGS__); \
-		return __LINE__; \
-	} while (0)
 
 int front_main(int argc, char *argv[])
 {
@@ -167,21 +205,23 @@ int front_main(int argc, char *argv[])
 	u32 delay_timer_ms = SDL_GetTicks();
 	bool need_keypress = false;
 
-	chip8_init(&chip8, rom_buffer, rom_size);
-
 #ifndef NDEBUG
-	u16 history[256] = {0};
+	u16 history[64] = {0};
 #endif
+
+	chip8_init(&chip8, rom_buffer, rom_size);
 
 	while (1) {
 		// TODO: configurable cycle delay.
 		SDL_Delay(1); // 16.666ms == 60hz
 
 		SDL_Event event;
+
 		while (SDL_PollEvent(&event)) {
 			switch (event.type) {
 			case SDL_QUIT:
 				return 0;
+
 			case SDL_KEYUP: {
 				u8 k = keypad_from_sdl_scancode(event.key.keysym.scancode);
 				if (k == 0xFF)
@@ -189,6 +229,7 @@ int front_main(int argc, char *argv[])
 				chip8.keys &= ~(1 << k);
 				break;
 			}
+
 			case SDL_KEYDOWN: {
 				u8 k = keypad_from_sdl_scancode(event.key.keysym.scancode);
 				if (k == 0xFF)
@@ -201,7 +242,18 @@ int front_main(int argc, char *argv[])
 				chip8.keys |= 1 << k;
 				break;
 			}
-				// TODO: handle window resize events
+
+			case SDL_WINDOWEVENT: {
+				if (event.window.event != SDL_WINDOWEVENT_RESIZED)
+					break;
+
+				SDL_RenderSetScale(renderer, event.window.data1 / 64.f, event.window.data2 / 32.f);
+
+				int res = redraw(renderer, &chip8);
+				if (res)
+					return res;
+				break;
+			}
 			}
 		}
 
@@ -211,8 +263,10 @@ int front_main(int argc, char *argv[])
 		// CYCLE
 		const enum chip8_interrupt in = chip8_cycle(&chip8);
 		switch (in) {
+
 		case CHIP8_OK:
 			break;
+
 		case CHIP8_NEED_RAND: {
 			// mulberry32 PRNG algorithm
 			u32 z = (mulberry32 += 0x6D2B79F5UL);
@@ -223,49 +277,22 @@ int front_main(int argc, char *argv[])
 			chip8_supply_rand(&chip8, z >> 24);
 			break;
 		}
+
 		case CHIP8_NEED_KEY:
 			need_keypress = true;
 			break;
+
 		case CHIP8_GFX_CLEAR:
-		case CHIP8_GFX_DRAW:
-			// Background color
-			if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0xFF))
-				RET_ERROR(
-					"SDL Error",
-					"Failed to set draw color: %s",
-					SDL_GetError());
-			if (SDL_RenderClear(renderer))
-				RET_ERROR(
-					"SDL Error",
-					"Failed to clear renderer: %s",
-					SDL_GetError());
-
-			if (in == CHIP8_GFX_CLEAR) {
-				SDL_RenderPresent(renderer);
-				break;
-			}
-
-			// Foreground color
-			if (SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF))
-				RET_ERROR(
-					"SDL Error",
-					"Failed to set draw color: %s",
-					SDL_GetError());
-
-			for (int y = 0; y < 32; y++)
-				for (int x = 0; x < 64; x++)
-					if (chip8.fb[x][y])
-						if (SDL_RenderDrawPoint(renderer, x, y))
-							RET_ERROR(
-								"SDL Error",
-								"Failed to draw point at %d, %d: %s",
-								x,
-								y,
-								SDL_GetError());
-			SDL_RenderPresent(renderer);
+		case CHIP8_GFX_DRAW: {
+			int res = redraw(renderer, &chip8);
+			if (res)
+				return res;
 			break;
+		}
+
 		case CHIP8_DELAY_TIMER_WRITE:
 			delay_timer_ms = SDL_GetTicks();
+
 		case CHIP8_NEED_DELAY_TIMER: {
 			// One chip8 tick is 1/60th of a second.
 			long ticks_since = chip8.dtimer_buf -
@@ -273,9 +300,11 @@ int front_main(int argc, char *argv[])
 			chip8_supply_delay_timer(&chip8, ticks_since < 0 ? 0 : ticks_since);
 			break;
 		}
+
 		case CHIP8_SOUND_TIMER_WRITE:
 			// TODO: set sound timer (SDL_AddTimer?)
 			break;
+
 		case CHIP8_BAD_INSTRUCTION:
 			RET_ERROR(
 				"Invalid Instruction",
@@ -285,8 +314,8 @@ int front_main(int argc, char *argv[])
 			RET_ERROR("Unrecoverable Interrupt", chip8_interrupt_desc(in));
 		}
 #ifndef NDEBUG
-		for (int i = 1; i < ARRAY_LEN(history); i++)
-			history[i - 1] = history[i];
+		// shift one item back and set last item.
+		memmove(history, history + 1, ARRAY_LEN(history) - 1);
 		history[ARRAY_LEN(history) - 1] = chip8.mem[chip8.pc] << 8 | chip8.mem[chip8.pc + 1];
 #endif
 	}
