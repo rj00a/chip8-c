@@ -31,8 +31,10 @@ const u8 chip8_fontmap[80] = {
 #define MEM (emu->mem)
 #define SP (emu->sp)
 #define V (emu->v)
-#define VF (emu->vf)
+#define VF (emu->v[15])
 #define KEYS (emu->keys)
+#define DTIMER (emu->dtimer_buf)
+#define STIMER (emu->stimer_buf)
 #define SAS (emu->sas)
 #define I (emu->i)
 #define FB (emu->fb)
@@ -57,47 +59,6 @@ void chip8_init(struct chip8 *emu, const u8 *rom, size_t sz)
 	memset(FB, 0, sizeof FB);
 }
 
-const char *chip8_interrupt_desc(enum chip8_interrupt e)
-{
-	switch (e) {
-	case CHIP8_OK:
-		return "No interrupt occurred..";
-	case CHIP8_BAD_INSTRUCTION:
-		return "Invalid instruction.";
-	case CHIP8_OOB_INSTRUCTION:
-		return "Tried to read an instruction out of bounds";
-	case CHIP8_SAS_UNDERFLOW:
-		return "Tried to return from a subroutine but the subroutine address stack was empty.";
-	case CHIP8_SAS_OVERFLOW:
-		return "Tried to return from a subroutine but the subroutine address stack was full.";
-	case CHIP8_NEED_RAND:
-		return "The emulator needs a random number to complete the current cycle.";
-	case CHIP8_GFX_OOB:
-		return "The sprite drawing instruction tried to read from memory out of bounds.";
-	case CHIP8_GFX_UPDATE:
-		return "The graphics buffer was updated.";
-	case CHIP8_BAD_KEY:
-		return "Tried to set a key with a code greater than 0xF.";
-	case CHIP8_NEED_KEY:
-		return "The emulator is waiting for a keypress.";
-	case CHIP8_DELAY_TIMER_WRITE:
-		return "The delay timer has been written to.";
-	case CHIP8_NEED_DELAY_TIMER:
-		return "The emulator needs the elapsed time since the last write to the delay timer to complete the current cycle.";
-	case CHIP8_SOUND_TIMER_WRITE:
-		return "The sound timer has been written to.";
-	case CHIP8_BAD_FONT_DIGIT:
-		return "Tried to get a font digit greater than 0xF";
-	case CHIP8_OOB_BCD:
-		return "Tried to write a binary coded decimal out of bounds.";
-	case CHIP8_OOB_REGWRITE:
-		return "Tried to write the contents of the V registers out of bounds.";
-	case CHIP8_OOB_REGREAD:
-		return "Tried to read data into the V registers out of bounds.";
-	}
-	return NULL;
-}
-
 enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 {
 	if (PC >= 0xFFF)
@@ -108,41 +69,43 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 	switch ((ins & 0xF000) >> 12) {
 	case 0x0:
 		switch (ins) {
-		case 0x00E0: // clear screen.
-			memset(FB, 0, sizeof(FB));
-			return CHIP8_GFX_UPDATE;
-		case 0x00EE:
+		case 0x00E0: // CLS - clear screen.
+			memset(FB, 0, sizeof FB);
+			PC += 2;
+			return CHIP8_GFX_CLEAR;
+		case 0x00EE: // RET - return from subroutine
 			if (SP == 0)
 				return CHIP8_SAS_UNDERFLOW;
 			PC = SAS[--SP] + 1;
 			return CHIP8_OK;
 		}
+		// Ignore the SYS instruction.
 		break;
-	case 0x1: // Jump to address at NNN
+	case 0x1: // JP - Jump to address at NNN
 		PC = ins & 0x0FFF;
 		return CHIP8_OK;
-	case 0x2: // Execute subroutine at NNN
+	case 0x2: // CALL - Execute subroutine at NNN
 		if (SP == 15)
 			return CHIP8_SAS_OVERFLOW;
 		SAS[SP++] = PC;
 		PC = ins & 0x0FFF;
 		return CHIP8_OK;
-	case 0x3: // Skip next instruction if VX is equal to NN.
+	case 0x3: // SE - Skip next instruction if VX is equal to NN.
 		PC += V[(ins & 0x0F00) >> 8] == (ins & 0x00FF) ? 4 : 2;
 		return CHIP8_OK;
-	case 0x4: // Skip next instruction if VX is not equal to NN.
+	case 0x4: // SNE - Skip next instruction if VX is not equal to NN.
 		PC += V[(ins & 0x0F00) >> 8] != (ins & 0x00FF) ? 4 : 2;
 		return CHIP8_OK;
-	case 0x5: // Skip next instruction if VX is equal to VY.
+	case 0x5: // SE - Skip next instruction if VX is equal to VY.
 		if ((ins & 0x000F) == 0)
 			break;
 		PC += V[(ins & 0x0F00) >> 8] == V[(ins & 0x00F0) >> 4] ? 4 : 2;
 		return CHIP8_OK;
-	case 0x6: // Store NN in VX
+	case 0x6: // LD - load NN into VX
 		V[(ins & 0x0F00) >> 8] = ins & 0x00FF;
 		PC += 2;
 		return CHIP8_OK;
-	case 0x7: // Add NN to VX
+	case 0x7: // ADD - Add NN to VX
 		V[(ins & 0x0F00) >> 8] += ins & 0x00FF;
 		PC += 2;
 		return CHIP8_OK;
@@ -150,43 +113,48 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 		u8 *const vx = V + ((ins & 0x0F00) >> 8);
 		u8 *const vy = V + ((ins & 0x00F0) >> 4);
 		switch (ins & 0x000F) {
-		case 0x0:
+		case 0x0: // LD - store VY in VX
 			*vx = *vy;
 			break;
-		case 0x1:
+		case 0x1: // OR - store VX | VY in VX
 			*vx |= *vy;
 			break;
-		case 0x2:
+		case 0x2: // AND - store VX & VY in VX
 			*vx &= *vy;
 			break;
-		case 0x3:
+		case 0x3: // XOR - store VX ^ VY in VX
 			*vx ^= *vy;
 			break;
-		case 0x4: {
+		case 0x4: { // ADD - store VX + VY in VX.
 			const u8 x = *vx;
 			*vx += *vy;
+			// set VF to 1 on overflow, 0 otherwise.
 			VF = *vx < x ? 1 : 0;
 			break;
 		}
-		case 0x5: {
+		case 0x5: { // SUB - store VX - VY in VX
 			const u8 x = *vx;
-			*vx -= *vy;
+			// NOTE: VF is set before subtracting.
 			VF = *vx > x ? 1 : 0;
+			*vx -= *vy;
 			break;
 		}
-		case 0x6:
-			VF = *vy & 1;
-			*vx = *vy >> 1;
+		case 0x6: // SHR - store VX >> 1 in VX
+			// set VF to the LSB of VX before shifting
+			VF = *vx & 1;
+			*vx >>= 1;
 			break;
-		case 0x7: {
+		case 0x7: { // SUBN - store VY - VX in VX
 			const u8 x = *vx;
 			*vx = *vy - *vx;
+			// VF is 1 if a carry occurs, 0 if not.
 			VF = *vx > x ? 1 : 0;
 			break;
 		}
-		case 0xF:
-			VF = *vy & 0x80;
-			*vx = *vy << 1;
+		case 0xE: // SHL - store VX << 1 in VX
+			// Store the MSB of VX in VF before shifting
+			VF = *vx & 0x80;
+			*vx <<= 1;
 			break;
 		default:
 			return CHIP8_BAD_INSTRUCTION;
@@ -194,21 +162,21 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 		PC += 2;
 		return CHIP8_OK;
 	}
-	case 0x9: // Skip next instruction if VX and VY are not equal
+	case 0x9: // SNE - Skip next instruction if VX and VY are not equal
 		if ((ins & 0x000F) != 0)
 			break;
-		PC += V[(ins & 0x0F00) >> 8] == V[(ins & 0x00F0) >> 4] ? 4 : 2;
+		PC += V[(ins & 0x0F00) >> 8] != V[(ins & 0x00F0) >> 4] ? 4 : 2;
 		return CHIP8_OK;
-	case 0xA: // Store address NNN in register I
+	case 0xA: // LD - Store address NNN in register I
 		I = ins & 0x0FFF;
 		PC += 2;
 		return CHIP8_OK;
-	case 0xB: // Jump to address NNN + V0
+	case 0xB: // JP - Jump to address NNN + V0
 		PC = (ins & 0x0FFF) + V[0];
 		return CHIP8_OK;
-	case 0xC: // Set VX to a random number
+	case 0xC: // RND - Set VX to a random number
 		return CHIP8_NEED_RAND;
-	case 0xD: { // Draw sprite at pos VX, VY
+	case 0xD: { // DRW - Draw sprite at pos VX, VY
 		// TODO: handle the gfx_wrapping option.
 		const u8 xpos = V[(ins & 0x0F00) >> 8];
 		const u8 ypos = V[(ins & 0x00F0) >> 4];
@@ -241,17 +209,17 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 			}
 		}
 		PC += 2;
-		return CHIP8_GFX_UPDATE;
+		return CHIP8_GFX_DRAW;
 	}
-	case 0xE: { // Skip next instruction based on keypad state
+	case 0xE: {
 		const u8 k = V[(ins & 0x0F00) >> 8];
 		switch (ins & 0x00FF) {
-		case 0x9E:
+		case 0x9E: // SKP - Skip next instruction if VX key is pressed
 			if (k > 0xF)
 				return CHIP8_BAD_KEY;
 			PC += KEYS & 1 << k ? 4 : 2;
 			return CHIP8_OK;
-		case 0xA1:
+		case 0xA1: // SKNP - Skip next instruction if VX key is not pressed
 			if (k > 0xF)
 				return CHIP8_BAD_KEY;
 			PC += KEYS & 1 << k ? 2 : 4;
@@ -263,28 +231,30 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 		const u8 x = (ins & 0x0F00) >> 8;
 		u8 *const vx = V + x;
 		switch (ins & 0x00FF) {
-		case 0x07:
+		case 0x07: // LD VX, DT - load delay timer into VX
 			return CHIP8_NEED_DELAY_TIMER;
-		case 0x0A:
+		case 0x0A: // LD VX, K - wait for key press and store it in VX
 			return CHIP8_NEED_KEY;
-		case 0x15:
+		case 0x15: // LD DT, VX - load VX into delay timer
+			DTIMER = *vx;
 			PC += 2;
 			return CHIP8_DELAY_TIMER_WRITE;
-		case 0x18:
+		case 0x18: // LD ST, VX - load VX into sound timer
+			STIMER = *vx;
 			PC += 2;
 			return CHIP8_SOUND_TIMER_WRITE;
-		case 0x1E: // Add VX to I.
+		case 0x1E: // ADD I, VX - Add VX to I.
 			I += *vx;
 			PC += 2;
 			return CHIP8_OK;
-		case 0x29: // Set I to the font digit in VX.
+		case 0x29: // LD F, VX - Set I to the font digit in VX.
 			if (*vx > 0xF)
 				return CHIP8_BAD_FONT_DIGIT;
 			// Font digits are 5 pixels tall.
 			I = *vx * 5;
 			PC += 2;
 			return CHIP8_OK;
-		case 0x33: // Write binary coded decimal (BCD) at I reg.
+		case 0x33: // LD B, VX - Write binary coded decimal (BCD) at I reg.
 			if (I + 2 > 0xFFF)
 				return CHIP8_OOB_BCD;
 			MEM[I] = (*vx / 100) % 10;
@@ -292,19 +262,19 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 			MEM[I + 2] = *vx % 10;
 			PC += 2;
 			return CHIP8_OK;
-		case 0x55: // Write V registers to memory at reg I.
+		case 0x55: // LD [I], VX - Write content of V registers to memory at reg
+				   // I.
 			if (I + x + 1 > 0xFFF)
 				return CHIP8_OOB_REGWRITE;
-			for (int i = 0; i < x + 1; i++) MEM[I + i] = V[i];
-			I += x + 1;
+			for (int i = 0; i < x + 1; i++)
+				MEM[I + i] = V[i];
 			PC += 2;
 			return CHIP8_OK;
-		case 0x65: // Read memory at I into V registers
+		case 0x65: // LD VX, [I] - Read memory at I into V registers.
 			if (I + x + 1 > 0xFFF)
 				return CHIP8_OOB_REGREAD;
-			for (int i = 0; i < x + 1; i++) V[i] = MEM[I + i];
-			// I is left unmodified according to wikipedia.
-			//I += x + 1;
+			for (int i = 0; i < x + 1; i++)
+				V[i] = MEM[I + i];
 			PC += 2;
 			return CHIP8_OK;
 		}
@@ -313,6 +283,49 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 	}
 
 	return CHIP8_BAD_INSTRUCTION;
+}
+
+const char *chip8_interrupt_desc(enum chip8_interrupt e)
+{
+	switch (e) {
+	case CHIP8_OK:
+		return "No interrupt occurred.";
+	case CHIP8_BAD_INSTRUCTION:
+		return "Invalid instruction.";
+	case CHIP8_OOB_INSTRUCTION:
+		return "Tried to read an instruction out of bounds";
+	case CHIP8_SAS_UNDERFLOW:
+		return "Tried to return from a subroutine but the subroutine address stack was empty.";
+	case CHIP8_SAS_OVERFLOW:
+		return "Tried to return from a subroutine but the subroutine address stack was full.";
+	case CHIP8_NEED_RAND:
+		return "The emulator needs a random number to complete the current cycle.";
+	case CHIP8_GFX_OOB:
+		return "The sprite drawing instruction tried to read from memory out of bounds.";
+	case CHIP8_GFX_DRAW:
+		return "The graphics buffer was drawn to.";
+	case CHIP8_GFX_CLEAR:
+		return "The graphics buffer was cleared.";
+	case CHIP8_BAD_KEY:
+		return "Tried to set a key with a code greater than 0xF.";
+	case CHIP8_NEED_KEY:
+		return "The emulator is waiting for a keypress.";
+	case CHIP8_DELAY_TIMER_WRITE:
+		return "The delay timer has been written to.";
+	case CHIP8_NEED_DELAY_TIMER:
+		return "The emulator needs to read from the delay timer.";
+	case CHIP8_SOUND_TIMER_WRITE:
+		return "The sound timer has been written to.";
+	case CHIP8_BAD_FONT_DIGIT:
+		return "Tried to get a font digit greater than 0xF";
+	case CHIP8_OOB_BCD:
+		return "Tried to write a binary coded decimal out of bounds.";
+	case CHIP8_OOB_REGWRITE:
+		return "Tried to write the contents of the V registers out of bounds.";
+	case CHIP8_OOB_REGREAD:
+		return "Tried to read data into the V registers out of bounds.";
+	}
+	return NULL;
 }
 
 void chip8_supply_rand(struct chip8 *emu, u8 r)
@@ -325,6 +338,7 @@ void chip8_supply_key(struct chip8 *emu, u8 k)
 {
 	assert(k < 16);
 	V[MEM[PC] & 0x0F] = k;
+	PC += 2;
 }
 
 void chip8_supply_delay_timer(struct chip8 *emu, u8 t)

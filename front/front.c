@@ -2,6 +2,7 @@
 #include <SDL2/SDL_error.h>
 #include <SDL2/SDL_timer.h>
 #include <SDL2/SDL_video.h>
+#include <assert.h>
 #include <inttypes.h>
 #include <math.h>
 #include <stdarg.h>
@@ -16,14 +17,16 @@ static u8 rom_buffer[CHIP8_MAX_ROM_SIZE];
 
 static struct chip8 chip8;
 
+#define ARRAY_LEN(a) (sizeof(a)/sizeof((a)[0]))
+
 /* TODO: These command line options should be available:
 	--help
 	--width
 	--height
 	--cycle-delay
 	--wrapping-gfx
-	--disable-audio
-	--disable-message-boxes
+	--no-audio
+	--no-message-boxes
 	--foreground
 	--background
 */
@@ -161,16 +164,18 @@ int front_main(int argc, char *argv[])
 			"SDL Error", "Failed to set render scale: %s", SDL_GetError());
 
 	u32 mulberry32 = time(NULL);
-	u32 delay_timer = SDL_GetTicks();
-	u32 sound_timer = delay_timer;
+	u32 delay_timer_ms = SDL_GetTicks();
 	bool need_keypress = false;
 
 	chip8_init(&chip8, rom_buffer, rom_size);
+
+#ifndef NDEBUG
+	u16 history[256] = {0};
+#endif
+
 	while (1) {
 		// TODO: configurable cycle delay.
-		SDL_Delay(17); // 16.666ms == 60hz
-
-		// TODO: decrease sound timer here.
+		SDL_Delay(1); // 16.666ms == 60hz
 
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
@@ -218,7 +223,8 @@ int front_main(int argc, char *argv[])
 		case CHIP8_NEED_KEY:
 			need_keypress = true;
 			break;
-		case CHIP8_GFX_UPDATE:
+		case CHIP8_GFX_CLEAR:
+		case CHIP8_GFX_DRAW:
 			// Background color
 			if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0xFF))
 				RET_ERROR(
@@ -230,12 +236,19 @@ int front_main(int argc, char *argv[])
 					"SDL Error",
 					"Failed to clear renderer: %s",
 					SDL_GetError());
+
+			if (in == CHIP8_GFX_CLEAR) {
+				SDL_RenderPresent(renderer);
+				break;
+			}
+
 			// Foreground color
 			if (SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF))
 				RET_ERROR(
 					"SDL Error",
 					"Failed to set draw color: %s",
 					SDL_GetError());
+
 			for (int y = 0; y < 32; y++)
 				for (int x = 0; x < 64; x++)
 					if (chip8.fb[x][y])
@@ -249,14 +262,12 @@ int front_main(int argc, char *argv[])
 			SDL_RenderPresent(renderer);
 			break;
 		case CHIP8_DELAY_TIMER_WRITE:
-			delay_timer = SDL_GetTicks();
-			break;
+			delay_timer_ms = SDL_GetTicks();
 		case CHIP8_NEED_DELAY_TIMER: {
-			// ticks_since is expected to overflow if more than 255 ticks pass.
-			// One tick is 1/60th of a second.
-			u8 ticks_since =
-				round((SDL_GetTicks() - delay_timer) / (1000.0 / 60));
-			chip8_supply_delay_timer(&chip8, ticks_since);
+			// One chip8 tick is 1/60th of a second.
+			long ticks_since = chip8.dtimer_buf -
+				lroundf((SDL_GetTicks() - delay_timer_ms) / (1000.f / 60.f));
+			chip8_supply_delay_timer(&chip8, ticks_since < 0 ? 0 : ticks_since);
 			break;
 		}
 		case CHIP8_SOUND_TIMER_WRITE:
@@ -270,6 +281,11 @@ int front_main(int argc, char *argv[])
 		default:
 			RET_ERROR("Unrecoverable Interrupt", chip8_interrupt_desc(in));
 		}
+#ifndef NDEBUG
+		for (int i = 1; i < ARRAY_LEN(history); i++)
+			history[i - 1] = history[i];
+		history[ARRAY_LEN(history) - 1] = chip8.mem[chip8.pc] << 8 | chip8.mem[chip8.pc + 1];
+#endif
 	}
 
 	SDL_DestroyRenderer(renderer);
