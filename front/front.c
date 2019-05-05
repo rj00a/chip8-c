@@ -182,23 +182,26 @@ int front_main(int argc, char *argv[])
 			switch (event.type) {
 			case SDL_QUIT:
 				return 0;
-			case SDL_KEYUP:
+			case SDL_KEYUP: {
+				u8 k = keypad_from_sdl_scancode(event.key.keysym.scancode);
+				if (k == 0xFF)
+					break; // Irrelevant key
+				chip8.keys &= ~(1 << k);
+				break;
+			}
 			case SDL_KEYDOWN: {
 				u8 k = keypad_from_sdl_scancode(event.key.keysym.scancode);
 				if (k == 0xFF)
 					break; // Irrelevant key
-				if (event.type == SDL_KEYDOWN)
-					chip8.keys |= 1 << k;
-				else
-					chip8.keys &= ~(1 << k);
-
 				if (need_keypress) {
 					chip8_supply_key(&chip8, k);
 					need_keypress = false;
+					break;
 				}
+				chip8.keys |= 1 << k;
 				break;
 			}
-				// TODO: handle resize events
+				// TODO: handle window resize events
 			}
 		}
 

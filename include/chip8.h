@@ -18,8 +18,8 @@ struct chip8 {
 	// Subroutine address stack
 	// An address is added to the stack when a subroutine is called.
 	uint16_t sas[16];
-	// The index into the SAS where the next address will go.
-	// SAS is empty if sp is zero.
+	// The index into the stack where the next address will go.
+	// the stack is empty if sp is zero.
 	uint8_t sp;
 	// The keypad
 	// Has 16 key states represented by each bit.
@@ -33,7 +33,7 @@ struct chip8 {
 	// Then, cycle returns with CHIP8_SOUND_TIMER_WRITE.
 	uint8_t stimer_buf;
 	// Main memory
-	uint8_t mem[0x1000];
+	uint8_t mem[4096];
 	// The frame buffer
 	// Each byte indicates the state of a pixel.
 	// We could pack it 8x tighter but that would be annoying to work with.
@@ -50,8 +50,8 @@ enum chip8_interrupt {
 	CHIP8_BAD_INSTRUCTION,
 	CHIP8_OOB_INSTRUCTION,
 	CHIP8_GFX_CLEAR,
-	CHIP8_SAS_UNDERFLOW,
-	CHIP8_SAS_OVERFLOW,
+	CHIP8_STACK_UNDERFLOW,
+	CHIP8_STACK_OVERFLOW,
 	CHIP8_NEED_RAND,
 	CHIP8_GFX_OOB,
 	CHIP8_GFX_DRAW,

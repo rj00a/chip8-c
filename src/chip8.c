@@ -35,7 +35,7 @@ const u8 chip8_fontmap[80] = {
 #define KEYS (emu->keys)
 #define DTIMER (emu->dtimer_buf)
 #define STIMER (emu->stimer_buf)
-#define SAS (emu->sas)
+#define STACK (emu->sas)
 #define I (emu->i)
 #define FB (emu->fb)
 
@@ -44,9 +44,11 @@ void chip8_init(struct chip8 *emu, const u8 *rom, size_t sz)
 	memset(V, 0, sizeof V);
 	I = 0;
 	PC = 0x200;
-	memset(SAS, 0, sizeof SAS);
+	memset(STACK, 0, sizeof STACK);
 	SP = 0;
 	KEYS = 0;
+	DTIMER = 0;
+	STIMER = 0;
 
 	// Font map goes from 0x000 to 0x050.
 	// TODO: Does it actually go from 0x50 to 0xA0?
@@ -75,8 +77,8 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 			return CHIP8_GFX_CLEAR;
 		case 0x00EE: // RET - return from subroutine
 			if (SP == 0)
-				return CHIP8_SAS_UNDERFLOW;
-			PC = SAS[--SP] + 1;
+				return CHIP8_STACK_UNDERFLOW;
+			PC = STACK[--SP] + 2;
 			return CHIP8_OK;
 		}
 		// Ignore the SYS instruction.
@@ -85,9 +87,9 @@ enum chip8_interrupt chip8_cycle(struct chip8 *emu)
 		PC = ins & 0x0FFF;
 		return CHIP8_OK;
 	case 0x2: // CALL - Execute subroutine at NNN
-		if (SP == 15)
-			return CHIP8_SAS_OVERFLOW;
-		SAS[SP++] = PC;
+		if (SP == 0xFF)
+			return CHIP8_STACK_OVERFLOW;
+		STACK[SP++] = PC;
 		PC = ins & 0x0FFF;
 		return CHIP8_OK;
 	case 0x3: // SE - Skip next instruction if VX is equal to NN.
@@ -294,9 +296,9 @@ const char *chip8_interrupt_desc(enum chip8_interrupt e)
 		return "Invalid instruction.";
 	case CHIP8_OOB_INSTRUCTION:
 		return "Tried to read an instruction out of bounds";
-	case CHIP8_SAS_UNDERFLOW:
+	case CHIP8_STACK_UNDERFLOW:
 		return "Tried to return from a subroutine but the subroutine address stack was empty.";
-	case CHIP8_SAS_OVERFLOW:
+	case CHIP8_STACK_OVERFLOW:
 		return "Tried to return from a subroutine but the subroutine address stack was full.";
 	case CHIP8_NEED_RAND:
 		return "The emulator needs a random number to complete the current cycle.";
