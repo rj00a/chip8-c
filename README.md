@@ -31,7 +31,7 @@ ZXCV
 On non-QUERTY keyboards, these keys should still be mapped to the same physical position.
 
 ## TODO
-- [] Test on Mac and Windows.
-- [] Add sound support.
-- [] Add commandline options.
-- [] Fix emulator bugs.
+- [ ] Test on Mac and Windows.
+- [ ] Add sound support.
+- [ ] Add commandline options.
+- [ ] Fix emulator bugs.
