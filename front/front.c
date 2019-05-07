@@ -17,7 +17,7 @@ static u8 rom_buffer[CHIP8_MAX_ROM_SIZE];
 
 static struct chip8 chip8;
 
-#define ARRAY_LEN(a) (sizeof(a)/sizeof((a)[0]))
+#define ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))
 
 #define RET_ERROR(...) \
 	do { \
@@ -61,26 +61,16 @@ static void report(
 
 static int redraw(SDL_Renderer *renderer, struct chip8 *chip8)
 {
-
 	// Background color
 	if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0xFF))
-		RET_ERROR(
-			"SDL Error",
-			"Failed to set draw color: %s",
-			SDL_GetError());
+		RET_ERROR("SDL Error", "Failed to set draw color: %s", SDL_GetError());
 
 	if (SDL_RenderClear(renderer))
-		RET_ERROR(
-			"SDL Error",
-			"Failed to clear renderer: %s",
-			SDL_GetError());
+		RET_ERROR("SDL Error", "Failed to clear renderer: %s", SDL_GetError());
 
 	// Foreground color
 	if (SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF))
-		RET_ERROR(
-			"SDL Error",
-			"Failed to set draw color: %s",
-			SDL_GetError());
+		RET_ERROR("SDL Error", "Failed to set draw color: %s", SDL_GetError());
 
 	for (int y = 0; y < 32; y++)
 		for (int x = 0; x < 64; x++)
@@ -239,7 +229,9 @@ int front_main(int argc, char *argv[])
 
 				// Toggle Fullscreen
 				if (keysym.sym == SDLK_F11) {
-					if (SDL_SetWindowFullscreen(window, fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP))
+					if (SDL_SetWindowFullscreen(
+							window,
+							fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP))
 						RET_ERROR(
 							"SDL Error",
 							"Failed to toggle borderless fullscreen mode: %s",
@@ -255,12 +247,12 @@ int front_main(int argc, char *argv[])
 
 					SDL_RenderSetScale(renderer, w / 64.f, l / 32.f);
 					int res = redraw(renderer, &chip8);
-					
+
 					if (res)
 						return res;
 					break;
 				}
-				
+
 				u8 kp = keypad_from_sdl_scancode(keysym.scancode);
 
 				if (kp == 0xFF)
@@ -280,7 +272,10 @@ int front_main(int argc, char *argv[])
 				if (event.window.event != SDL_WINDOWEVENT_RESIZED)
 					break;
 
-				SDL_RenderSetScale(renderer, event.window.data1 / 64.f, event.window.data2 / 32.f);
+				SDL_RenderSetScale(
+					renderer,
+					event.window.data1 / 64.f,
+					event.window.data2 / 32.f);
 
 				int res = redraw(renderer, &chip8);
 				if (res)
@@ -296,7 +291,6 @@ int front_main(int argc, char *argv[])
 		// CYCLE
 		const enum chip8_interrupt in = chip8_cycle(&chip8);
 		switch (in) {
-
 		case CHIP8_OK:
 			break;
 
@@ -349,7 +343,8 @@ int front_main(int argc, char *argv[])
 #ifndef NDEBUG
 		// shift one item back and set last item.
 		memmove(history, history + 1, ARRAY_LEN(history) - 1);
-		history[ARRAY_LEN(history) - 1] = chip8.mem[chip8.pc] << 8 | chip8.mem[chip8.pc + 1];
+		history[ARRAY_LEN(history) - 1] =
+			chip8.mem[chip8.pc] << 8 | chip8.mem[chip8.pc + 1];
 #endif
 	}
 
