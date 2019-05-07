@@ -12,3 +12,6 @@ ninja -C build
 ```
 
 Let it be known: There are bugs.
+
+![Screenshot](readme-img.png "Screenshot")
+
