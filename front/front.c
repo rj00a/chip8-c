@@ -204,6 +204,7 @@ int front_main(int argc, char *argv[])
 	u32 mulberry32 = time(NULL);
 	u32 delay_timer_ms = SDL_GetTicks();
 	bool need_keypress = false;
+	bool fullscreen = false;
 
 #ifndef NDEBUG
 	u16 history[64] = {0};
@@ -231,15 +232,47 @@ int front_main(int argc, char *argv[])
 			}
 
 			case SDL_KEYDOWN: {
-				u8 k = keypad_from_sdl_scancode(event.key.keysym.scancode);
-				if (k == 0xFF)
+				SDL_Keysym keysym = event.key.keysym;
+				// Exit on escape.
+				if (keysym.sym == SDLK_ESCAPE)
+					return 0;
+
+				// Toggle Fullscreen
+				if (keysym.sym == SDLK_F11) {
+					if (SDL_SetWindowFullscreen(window, fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP))
+						RET_ERROR(
+							"SDL Error",
+							"Failed to toggle borderless fullscreen mode: %s",
+							SDL_GetError());
+
+					fullscreen = !fullscreen;
+
+					int w, l;
+					SDL_GetRendererOutputSize(renderer, &w, &l);
+
+					printf("%d, %d\n", w, l);
+					printf("fullscreen: %s\n", fullscreen ? "true" : "false");
+
+					SDL_RenderSetScale(renderer, w / 64.f, l / 32.f);
+					int res = redraw(renderer, &chip8);
+					
+					if (res)
+						return res;
+					break;
+				}
+				
+				u8 kp = keypad_from_sdl_scancode(keysym.scancode);
+
+				if (kp == 0xFF)
 					break; // Irrelevant key
+
 				if (need_keypress) {
-					chip8_supply_key(&chip8, k);
+					chip8_supply_key(&chip8, kp);
 					need_keypress = false;
 					break;
 				}
-				chip8.keys |= 1 << k;
+
+				chip8.keys |= 1 << kp;
 				break;
 			}
 
