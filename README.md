@@ -10,3 +10,5 @@ meson setup --buildtype release build
 ninja -C build
 ./build/front/chip8 roms/TICTAC
 ```
+
+Let it be known: There are bugs.
